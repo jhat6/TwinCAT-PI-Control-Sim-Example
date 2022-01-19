@@ -1,0 +1,184 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="PI_CNTRL_SIM_CLOSED_LOOP" Id="{e8c0f191-8a86-470a-8efc-685c33b8ee72}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM PI_CNTRL_SIM_CLOSED_LOOP
+VAR	
+	//########################## TuTg process parameter declarations ##########################
+	fManSyncValue				: LREAL;
+	bSync						: BOOL;
+	fOut						: LREAL;
+	
+	eMode						: E_CTRL_MODE;
+	stCTRL_TuTg_PARAMS			: ST_CTRL_TuTg_PARAMS;
+	eErrorId					: E_CTRL_ERRORCODES;
+	bError						: BOOL;
+	(* Filter *)
+	fbCTRL_TuTg					: FB_CTRL_TuTg;
+	bInit						: BOOL	:= TRUE;
+	fbTON						: TON;
+
+	
+	//########################### Data logger parameter declarations #########################
+	bStart						: BOOL := TRUE;				(* set TRUE to start logging *)
+	eModeLog					: E_CTRL_MODE := eCTRL_MODE_ACTIVE;
+
+	fbCTRL_LOG_DATA				: FB_CTRL_LOG_DATA;
+	stCTRL_LOG_DATA_PARAMS		: ST_CTRL_LOG_DATA_PARAMS;
+
+	LoggerData					: LOGGER_DATA;
+
+	eErrorIdLog					: E_CTRL_ERRORCODES;
+	bErrorLog					: BOOL;
+	bFileOpen					: BOOL;
+	bFileClosed					: BOOL;
+
+	bInitLog					: BOOL	:= TRUE;
+	fbR_TRIG					: R_TRIG;
+	TONLog						: TON;
+	
+	//########################### PI controller parameter declarations #######################
+	fSetpointValue				: LREAL	:= 20;	
+	bSyncPI						: BOOL;
+
+	fOutPI						: LREAL := 0;
+	bHold						: BOOL;
+
+	eModePI						: E_CTRL_MODE;
+	stCTRL_PI_PARAMS			: ST_CTRL_PI_PARAMS;
+
+	eErrorIdPI					: E_CTRL_ERRORCODES;
+	bErrorPI					: BOOL;
+	bARWactive					: BOOL;
+
+	(* controller  *)
+	fbCTRL_PI					: FB_CTRL_PI;
+
+	bInitPI						: BOOL := TRUE;	
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF bInit THEN
+	(* init parameter struct *)
+	stCTRL_TuTg_PARAMS.tCtrlCycleTime		:= T#10MS;
+	stCTRL_TuTg_PARAMS.tTaskCycleTime		:= T#10ms;
+	stCTRL_TuTg_PARAMS.tTu					:= T#1S200MS;
+	stCTRL_TuTg_PARAMS.tTg					:= T#3S;
+	stCTRL_TuTg_PARAMS.fKp					:= 2.0;
+
+	(* set the mode to ACTIVE --> normal operation *)
+	eMode := eCTRL_MODE_ACTIVE;
+
+	(* reset the init flag *)
+	bInit := FALSE;
+END_IF
+
+(* generate input signal *)
+fbTON(	IN:= TRUE,
+		PT:= T#20S);
+		
+IF fbTON.Q THEN
+	fbTON(		IN:= FALSE);
+	fSetpointValue := -1.0 * fSetpointValue;
+END_IF
+
+
+(* call filter *)
+fbCTRL_TuTg(	fIn					:= fbCTRL_PI.fOut,
+				fManSyncValue		:= fManSyncValue,
+				eMode				:= eMode,
+				stParams			:= stCTRL_TuTg_PARAMS,
+				fOut				=> fOut,
+				eErrorId			=> eErrorId,
+				bError				=> bError
+				);
+
+
+
+//#####################################################################
+IF bInitPI THEN
+	(* init parameter struct *)
+	stCTRL_PI_PARAMS.tCtrlCycleTime		:= T#10ms;
+	stCTRL_PI_PARAMS.tTaskCycleTime		:= T#10MS;
+	stCTRL_PI_PARAMS.tTn				:= T#3S;		(* Time constant for Integral gain	*)
+	stCTRL_PI_PARAMS.fKp				:= 0.7;			(* proportional gain Kp				*)
+	stCTRL_PI_PARAMS.fOutMaxLimit		:=  100;  		(* maximum output limit				*)
+	stCTRL_PI_PARAMS.fOutMinLimit		:= -100;			(* minimum output limit			*)
+
+	(* set the mode to ACTIVE --> normal operation *)
+	eModePI := eCTRL_MODE_ACTIVE;
+
+	(* reset the init flag *)
+	bInitPI := FALSE;
+END_IF
+
+
+(* call controller *)
+fbCTRL_PI(		fSetpointValue			:= fSetpointValue,
+					fActualValue		:= fbCTRL_TuTg.fOut,
+					fManSyncValue		:= fManSyncValue,
+					bSync				:= bSyncPI,
+					eMode				:= eModePI,
+					bHold				:= bHold,
+					stParams			:= stCTRL_PI_PARAMS,
+					fOut				=> fOutPI,
+					bARWactive			=> bARWactive,
+					eErrorId			=> eErrorIdPI,
+					bError				=> bErrorPI
+				);
+
+//#####################################################################
+
+IF bInitLog THEN
+	(* init parameter struct *)
+	stCTRL_LOG_DATA_PARAMS.tLogCycleTime			:= T#100MS;
+	stCTRL_LOG_DATA_PARAMS.tTaskCycleTime			:= T#10ms;
+	stCTRL_LOG_DATA_PARAMS.nNumberOfColumns			:= 3;
+	stCTRL_LOG_DATA_PARAMS.sFileName				:= 'C:\Users\jeffa\OneDrive\Documents\Beckhoff\PI_CNTRL_SIM_CLOSED_LOOP_data.csv';
+
+	(* column headings *)	
+	stCTRL_LOG_DATA_PARAMS.arColumnHeadings[1]	:= 'MV';
+	stCTRL_LOG_DATA_PARAMS.arColumnHeadings[2]	:= 'PV';
+	stCTRL_LOG_DATA_PARAMS.arColumnHeadings[3]	:= 'SP';
+
+	eModeLog							:= eCTRL_MODE_PASSIVE;
+
+	(* reset the init flag *)
+	bInitLog							:= FALSE;
+END_IF
+
+
+
+TONLog(	IN:= TRUE,
+		PT:= T#50S);
+	
+IF TONLog.Q THEN	
+	(* set the mode to ACTIVE --> stop data logging and close the file *)
+	eModeLog := eCTRL_MODE_PASSIVE;
+	bStart := FALSE;
+ELSE
+	eModeLog := eCTRL_MODE_ACTIVE;
+	bStart := TRUE;
+END_IF
+
+
+(* write data to log in the LoggerData array *)
+LoggerData[ 1 ] := fOutPI;
+LoggerData[ 2 ] := fOut;
+LoggerData[ 3 ] := fSetpointValue;
+
+(* call function block *)
+fbCTRL_LOG_DATA(	fLogData	:= LoggerData,
+					eMode		:= eModeLog,
+					stParams	:= stCTRL_LOG_DATA_PARAMS,
+					eErrorId	=> eErrorIdLog,
+					bError		=> bErrorLog,
+					bFileOpen 	=> bFileOpen,
+					bFileClosed => bFileClosed);]]></ST>
+    </Implementation>
+    <LineIds Name="PI_CNTRL_SIM_CLOSED_LOOP">
+      <LineId Id="60" Count="35" />
+      <LineId Id="98" Count="79" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
